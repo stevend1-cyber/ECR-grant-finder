@@ -1,10 +1,7 @@
-// netlify/functions/search-grants.js
 exports.handler = async (event, context) => {
-  console.log('🔵 Function called!');
-  console.log('Method:', event.httpMethod);
-  console.log('Headers:', event.headers);
+  console.log('Function called:', event.httpMethod);
 
-  // CORS headers
+  // CRITICAL: CORS headers must be included in EVERY response
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
@@ -12,7 +9,7 @@ exports.handler = async (event, context) => {
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
-  // Handle OPTIONS request for CORS
+  // Handle preflight OPTIONS request
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
@@ -21,9 +18,8 @@ exports.handler = async (event, context) => {
     };
   }
 
-  // Only allow POST requests
+  // Only allow POST
   if (event.httpMethod !== 'POST') {
-    console.log('❌ Wrong method:', event.httpMethod);
     return {
       statusCode: 405,
       headers,
@@ -32,35 +28,25 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    console.log('🟢 Checking API key...');
+    // Check for API key
     const apiKey = process.env.ANTHROPIC_API_KEY;
     
     if (!apiKey) {
-      console.log('❌ No API key found in environment variables!');
+      console.log('ERROR: No API key found');
       return {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
-          error: 'ANTHROPIC_API_KEY not set in Netlify environment variables. Go to Site Settings → Environment variables and add it.' 
+          error: 'ANTHROPIC_API_KEY not set. Add it in Netlify Site Settings → Environment variables, then redeploy.' 
         })
       };
     }
 
-    if (!apiKey.startsWith('sk-ant-')) {
-      console.log('❌ API key has wrong format:', apiKey.substring(0, 7));
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ 
-          error: 'ANTHROPIC_API_KEY has wrong format. Should start with sk-ant-' 
-        })
-      };
-    }
+    console.log('API key found');
 
-    console.log('✅ API key found and valid format');
-
+    // Parse request
     const { filters } = JSON.parse(event.body);
-    console.log('📝 Filters received:', filters);
+    console.log('Filters:', filters);
     
     const currentYear = new Date().getFullYear();
     const currentMonth = new Date().toLocaleString('default', { month: 'long' });
@@ -77,9 +63,9 @@ exports.handler = async (event, context) => {
       searchQuery += ' funding amount';
     }
 
-    console.log('🔍 Search query:', searchQuery);
-    console.log('📡 Calling Anthropic API...');
+    console.log('Calling Anthropic API...');
 
+    // Call Anthropic API
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -134,39 +120,36 @@ Focus on grants specifically for Business, Law, or related social sciences field
       })
     });
 
-    console.log('📊 API Response status:', response.status);
+    console.log('API response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('❌ API Error:', errorText);
+      console.log('API error:', errorText);
       return {
         statusCode: response.status,
         headers,
         body: JSON.stringify({ 
-          error: `Anthropic API error (${response.status}): ${errorText}` 
+          error: `Anthropic API error: ${errorText}` 
         })
       };
     }
 
     const data = await response.json();
-    console.log('✅ API call successful');
-    console.log('Response content blocks:', data.content?.length);
+    console.log('Success! Returning data');
     
     return {
       statusCode: 200,
-      headers,
+      headers, // CRITICAL: Include CORS headers
       body: JSON.stringify(data)
     };
 
   } catch (error) {
-    console.log('❌ Function error:', error);
-    console.log('Error stack:', error.stack);
+    console.log('Function error:', error.message);
     return {
       statusCode: 500,
-      headers,
+      headers, // CRITICAL: Include CORS headers even on error
       body: JSON.stringify({ 
-        error: error.message,
-        stack: error.stack
+        error: error.message
       })
     };
   }
