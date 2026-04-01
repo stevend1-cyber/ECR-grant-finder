@@ -1,0 +1,12 @@
+{
+  "name": "grant-intelligence",
+  "version": "1.0.0",
+  "description": "AI-powered grant search for Early Career Researchers",
+  "main": "index.html",
+  "scripts": {
+    "test": "echo \"No tests specified\""
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
