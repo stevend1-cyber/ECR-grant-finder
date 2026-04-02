@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Grant Search - Debug Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #000;
+            color: #0f0;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #0f0;
+            border: none;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .result {
+            background: #111;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #0f0;
+            white-space: pre-wrap;
+        }
+        .error {
+            color: #f00;
+            border-color: #f00;
+        }
+        .success {
+            color: #0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Grant Search Function Test</h1>
+    
+    <button onclick="testFunction()">Test Function Call</button>
+    <button onclick="testDirect()">Test Direct Access</button>
+    
+    <div id="output"></div>
+
+    <script>
+        const output = document.getElementById('output');
+
+        function log(message, isError = false) {
+            const div = document.createElement('div');
+            div.className = isError ? 'result error' : 'result success';
+            div.textContent = message;
+            output.appendChild(div);
+        }
+
+        async function testDirect() {
+            output.innerHTML = '';
+            log('Testing direct function access...');
+            
+            try {
+                const response = await fetch('/.netlify/functions/search-grants', {
+                    method: 'GET'
+                });
+                
+                log(`Status: ${response.status}`);
+                log(`Status Text: ${response.statusText}`);
+                
+                const text = await response.text();
+                log(`Response: ${text}`);
+                
+                if (response.status === 405) {
+                    log('✅ Good! Function exists and rejects GET (expects POST)', false);
+                } else {
+                    log('Response Headers:');
+                    response.headers.forEach((value, key) => {
+                        log(`  ${key}: ${value}`);
+                    });
+                }
+            } catch (error) {
+                log(`❌ ERROR: ${error.message}`, true);
+                log(`Error type: ${error.name}`, true);
+            }
+        }
+
+        async function testFunction() {
+            output.innerHTML = '';
+            log('Testing POST request to function...');
+            
+            try {
+                log('Step 1: Preparing request...');
+                
+                const requestBody = {
+                    filters: {
+                        location: 'australia',
+                        minAmount: '',
+                        maxAmount: '',
+                        successRate: 'any'
+                    }
+                };
+                
+                log(`Request body: ${JSON.stringify(requestBody, null, 2)}`);
+                
+                log('Step 2: Sending fetch request...');
+                
+                const response = await fetch('/.netlify/functions/search-grants', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                log(`Step 3: Response received!`);
+                log(`Status: ${response.status} ${response.statusText}`);
+                
+                log('Response Headers:');
+                response.headers.forEach((value, key) => {
+                    log(`  ${key}: ${value}`);
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    log(`❌ Response Error: ${errorText}`, true);
+                    return;
+                }
+                
+                log('Step 4: Parsing JSON...');
+                const data = await response.json();
+                
+                log('Step 5: Success!');
+                log(`Response data: ${JSON.stringify(data, null, 2)}`);
+                
+                if (data.content) {
+                    log(`✅ Got ${data.content.length} content blocks`, false);
+                } else if (data.error) {
+                    log(`❌ API returned error: ${data.error}`, true);
+                }
+                
+            } catch (error) {
+                log(`❌ FETCH FAILED`, true);
+                log(`Error message: ${error.message}`, true);
+                log(`Error type: ${error.name}`, true);
+                log(`Error stack: ${error.stack}`, true);
+                
+                // Additional diagnostics
+                log('\nDiagnostics:', true);
+                log(`Current URL: ${window.location.href}`, true);
+                log(`Function URL: ${window.location.origin}/.netlify/functions/search-grants`, true);
+            }
+        }
+
+        // Auto-run on load
+        window.onload = () => {
+            log('Page loaded. Click a button to test.');
+            log(`Current URL: ${window.location.href}`);
+        };
+    </script>
+</body>
+</html>
