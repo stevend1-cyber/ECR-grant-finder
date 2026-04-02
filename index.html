@@ -9,31 +9,11 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            margin: 0;
-            padding: 0;
-            overflow-x: hidden;
-        }
-        
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        
-        input::placeholder {
-            color: #666;
-        }
-        
-        select option {
-            background: #1a1a2e;
-            color: #e8e8e8;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { margin: 0; padding: 0; overflow-x: hidden; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        input::placeholder { color: #666; }
+        select option { background: #1a1a2e; color: #e8e8e8; }
     </style>
 </head>
 <body>
@@ -42,7 +22,6 @@
     <script type="text/babel">
         const { useState } = React;
 
-        // Lucide React icons as inline SVG components
         const Search = ({ size = 24, color = 'currentColor', style = {} }) => (
             <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
                 <circle cx="11" cy="11" r="8"></circle>
@@ -117,84 +96,41 @@
                 setResults([]);
 
                 try {
-                    const currentYear = new Date().getFullYear();
-                    const currentMonth = new Date().toLocaleString('default', { month: 'long' });
+                    console.log('Calling function...');
                     
-                    let searchQuery = `Early Career Researcher grants Business Law ${currentYear} ${currentMonth} open applications`;
-                    
-                    if (filters.location === 'australia') {
-                        searchQuery += ' Australia';
-                    } else if (filters.location === 'international') {
-                        searchQuery += ' international worldwide';
-                    }
-                    
-                    if (filters.minAmount || filters.maxAmount) {
-                        searchQuery += ' funding amount';
-                    }
-
-                    const response = await fetch("https://api.anthropic.com/v1/messages", {
+                    const response = await fetch("/.netlify/functions/search-grants", {
                         method: "POST",
                         headers: {
                             "Content-Type": "application/json",
                         },
-                        body: JSON.stringify({
-                            model: "claude-sonnet-4-20250514",
-                            max_tokens: 4000,
-                            tools: [
-                                {
-                                    type: "web_search_20250305",
-                                    name: "web_search"
-                                }
-                            ],
-                            messages: [
-                                {
-                                    role: "user",
-                                    content: `Search for current grant opportunities for Early Career Researchers in Business and Law. Find grants that are currently open (closing date has not passed, currently accepting applications in ${currentMonth} ${currentYear}).
-
-Location focus: ${filters.location === 'australia' ? 'Australia' : filters.location === 'international' ? 'International (outside Australia)' : 'Both Australia and International'}
-
-Search Query: ${searchQuery}
-
-For each grant found, extract:
-1. Grant name/title
-2. Funding body/organization
-3. Amount/funding range
-4. Closing date (must be in the future)
-5. Eligibility criteria (especially for Early Career Researchers)
-6. Success rate if available
-7. URL/link to apply
-8. Geographic focus (Australia or international)
-
-Return ONLY a JSON array with this structure (no markdown, no preamble):
-[{
-  "name": "Grant Name",
-  "organization": "Funding Body",
-  "amount": "Amount range or specific amount",
-  "closingDate": "Date string",
-  "eligibility": "Brief eligibility summary",
-  "successRate": "Percentage or 'Not available'",
-  "url": "Application URL",
-  "location": "Australia or International or Specific country",
-  "description": "Brief description"
-}]
-
-Focus on grants specifically for Business, Law, or related social sciences fields. Only include grants with future closing dates.`
-                                }
-                            ]
-                        })
+                        body: JSON.stringify({ filters })
                     });
 
-                    const data = await response.json();
-                    
-                    const allText = data.content
-                        .filter(item => item.type === "text")
-                        .map(item => item.text)
-                        .join("\n");
+                    console.log('Response status:', response.status);
 
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Function error (${response.status}): ${errorText}`);
+                    }
+
+                    const data = await response.json();
+                    console.log('Data received:', data);
+                    
+                    // Extract text from content blocks
+                    const allText = data.content
+                        ?.filter(item => item.type === "text")
+                        .map(item => item.text)
+                        .join("\n") || '';
+
+                    console.log('Extracted text:', allText);
+
+                    // Try to find JSON in the response
                     let jsonMatch = allText.match(/\[[\s\S]*\]/);
                     if (jsonMatch) {
                         const grants = JSON.parse(jsonMatch[0]);
+                        console.log('Parsed grants:', grants);
                         
+                        // Apply filters
                         let filtered = grants;
                         
                         if (filters.minAmount) {
@@ -224,11 +160,12 @@ Focus on grants specifically for Business, Law, or related social sciences field
                         
                         setResults(filtered);
                     } else {
-                        setError("Could not parse grant results. Please try again.");
+                        setError("Could not parse grant results. The AI response format was unexpected.");
+                        console.error('No JSON found in response');
                     }
                 } catch (err) {
                     setError(`Search error: ${err.message}`);
-                    console.error(err);
+                    console.error('Error:', err);
                 } finally {
                     setIsSearching(false);
                 }
@@ -248,10 +185,7 @@ Focus on grants specifically for Business, Law, or related social sciences field
                     color: '#e8e8e8',
                     padding: '3rem 2rem'
                 }}>
-                    <div style={{
-                        maxWidth: '1200px',
-                        margin: '0 auto'
-                    }}>
+                    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
                         <div style={{
                             marginBottom: '3rem',
                             borderBottom: '3px solid #16213e',
@@ -294,11 +228,7 @@ Focus on grants specifically for Business, Law, or related social sciences field
                                 marginBottom: '1.5rem'
                             }}>
                                 <Filter size={20} color="#e94560" />
-                                <h2 style={{
-                                    fontSize: '1.5rem',
-                                    margin: 0,
-                                    fontWeight: '600'
-                                }}>Search Filters</h2>
+                                <h2 style={{ fontSize: '1.5rem', margin: 0, fontWeight: '600' }}>Search Filters</h2>
                             </div>
 
                             <div style={{
@@ -422,7 +352,7 @@ Focus on grants specifically for Business, Law, or related social sciences field
                                         <option value="any">Any Success Rate</option>
                                         <option value="high">High (≥30%)</option>
                                         <option value="medium">Medium (15-30%)</option>
-                                        <option value="low">Low (&lt;15%)</option>
+                                        <option value="low">&lt;15%</option>
                                         <option value="unknown">Unknown/Not Available</option>
                                     </select>
                                 </div>
@@ -448,7 +378,6 @@ Focus on grants specifically for Business, Law, or related social sciences field
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     gap: '0.5rem',
-                                    transition: 'transform 0.2s',
                                     fontFamily: "'Inter', sans-serif"
                                 }}
                             >
@@ -489,10 +418,7 @@ Focus on grants specifically for Business, Law, or related social sciences field
                                     Found {results.length} Current Opportunities
                                 </h2>
 
-                                <div style={{
-                                    display: 'grid',
-                                    gap: '1.5rem'
-                                }}>
+                                <div style={{ display: 'grid', gap: '1.5rem' }}>
                                     {results.map((grant, index) => (
                                         <div
                                             key={index}
