@@ -1,14 +1,5 @@
 [functions]
-  # Increase timeout to 60 seconds (Netlify free tier allows up to 10s, paid allows 26s)
-  # If you're on free tier, this will use the max available (10s)
   directory = "netlify/functions"
 
 [build]
-  # No build command needed for static site
   publish = "."
-
-[[redirects]]
-  # Ensure function routes work
-  from = "/.netlify/functions/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
