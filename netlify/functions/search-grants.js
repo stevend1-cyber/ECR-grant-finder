@@ -33,7 +33,6 @@ exports.handler = async (event, context) => {
     const currentYear = new Date().getFullYear();
     const currentMonth = new Date().toLocaleString('default', { month: 'long' });
     
-    // Simplified, faster search query
     let searchQuery = `ECR grants Business Law ${currentYear} open`;
     
     if (filters.location === 'australia') {
@@ -44,7 +43,6 @@ exports.handler = async (event, context) => {
 
     console.log('Calling API with query:', searchQuery);
 
-    // OPTIMIZED: Reduced max_tokens for faster response
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -53,8 +51,8 @@ exports.handler = async (event, context) => {
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2000, // REDUCED from 4000 for speed
+        model: "claude-sonnet-5", // UPDATED: current model as of July 2026
+        max_tokens: 2000,
         tools: [{
           type: "web_search_20250305",
           name: "web_search"
