@@ -79,7 +79,6 @@
             </svg>
         );
 
-        // Generate a job id without relying on crypto.randomUUID (not available on all setups)
         const generateJobId = () => {
             return 'job-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10);
         };
@@ -96,6 +95,7 @@
             const [error, setError] = useState(null);
             const [debugText, setDebugText] = useState(null);
             const [statusMessage, setStatusMessage] = useState('');
+            const [pendingJobId, setPendingJobId] = useState(null);
             const cancelRef = useRef(false);
 
             const extractJsonArray = (rawText) => {
@@ -118,90 +118,106 @@
 
             const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+            const parseAmount = (amountStr) => {
+                if (!amountStr) return 0;
+                const numbers = amountStr.match(/\d+(?:,\d+)*/g);
+                if (!numbers) return 0;
+                return parseInt(numbers[0].replace(/,/g, ''));
+            };
+
+            const applyFiltersAndSet = (grants) => {
+                let filtered = grants;
+                if (filters.minAmount) {
+                    filtered = filtered.filter(g => parseAmount(g.amount) >= parseInt(filters.minAmount));
+                }
+                if (filters.maxAmount) {
+                    filtered = filtered.filter(g => parseAmount(g.amount) <= parseInt(filters.maxAmount));
+                }
+                if (filters.successRate !== 'any') {
+                    filtered = filtered.filter(g => {
+                        if (g.successRate === 'Not available') return filters.successRate === 'unknown';
+                        const rate = parseFloat(g.successRate);
+                        if (filters.successRate === 'high') return rate >= 30;
+                        if (filters.successRate === 'medium') return rate >= 15 && rate < 30;
+                        if (filters.successRate === 'low') return rate < 15;
+                        return true;
+                    });
+                }
+                setResults(filtered);
+                if (filtered.length === 0) {
+                    setError("The search completed but no grants matched your filters. Try widening your criteria.");
+                }
+            };
+
+            const pollJob = async (jobId, maxAttempts) => {
+                let attempt = 0;
+                while (attempt < maxAttempts && !cancelRef.current) {
+                    await sleep(2000);
+                    attempt++;
+
+                    const statusResponse = await fetch(`/.netlify/functions/check-grant-status?jobId=${jobId}`);
+                    if (!statusResponse.ok) continue;
+
+                    const statusData = await statusResponse.json();
+
+                    if (statusData.status === 'done') {
+                        return { done: true, data: statusData.data };
+                    } else if (statusData.status === 'error') {
+                        throw new Error(statusData.error);
+                    }
+                    setStatusMessage(`Still searching... (${attempt * 2}s)`);
+                }
+                return { done: false };
+            };
+
+            const handleResult = (finalResultData) => {
+                const allText = finalResultData.content
+                    ?.filter(item => item.type === "text")
+                    .map(item => item.text)
+                    .join("\n") || '';
+
+                const grants = extractJsonArray(allText);
+
+                if (grants && Array.isArray(grants)) {
+                    applyFiltersAndSet(grants);
+                } else {
+                    setError("Could not parse the grant results. Showing the raw AI response below for debugging.");
+                    setDebugText(allText || '(empty response)');
+                }
+            };
+
             const searchGrants = async () => {
                 setIsSearching(true);
                 setError(null);
                 setDebugText(null);
                 setResults([]);
                 setStatusMessage('Starting search...');
+                setPendingJobId(null);
                 cancelRef.current = false;
 
                 const jobId = generateJobId();
 
                 try {
-                    // Kick off the background function. It returns 202 almost instantly
-                    // and keeps working for up to 15 minutes behind the scenes.
-                    await fetch("/.netlify/functions/search-grants-background", {
+                    const startResponse = await fetch("/.netlify/functions/search-grants-background", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ jobId, filters })
                     });
 
+                    if (!startResponse.ok && startResponse.status !== 202) {
+                        throw new Error(`Could not start the search (status ${startResponse.status}). Check that search-grants-background.js is deployed correctly.`);
+                    }
+
                     setStatusMessage('Searching the web for current grants...');
 
-                    // Poll the fast status-check function every 2 seconds
-                    const maxAttempts = 45; // ~90 seconds
-                    let attempt = 0;
-                    let finalResult = null;
+                    const result = await pollJob(jobId, 90);
 
-                    while (attempt < maxAttempts && !cancelRef.current) {
-                        await sleep(2000);
-                        attempt++;
-
-                        const statusResponse = await fetch(`/.netlify/functions/check-grant-status?jobId=${jobId}`);
-                        if (!statusResponse.ok) continue;
-
-                        const statusData = await statusResponse.json();
-
-                        if (statusData.status === 'done') {
-                            finalResult = statusData.data;
-                            break;
-                        } else if (statusData.status === 'error') {
-                            throw new Error(statusData.error);
-                        }
-                        // else still pending — keep polling
-                        setStatusMessage(`Still searching... (${attempt * 2}s)`);
+                    if (!result.done) {
+                        setPendingJobId(jobId);
+                        throw new Error('The search is taking longer than expected (over 3 minutes). It may still finish in the background — click "Check again" below rather than starting a new search.');
                     }
 
-                    if (!finalResult) {
-                        throw new Error('The search is taking longer than expected. It may still finish in the background — try again in a moment.');
-                    }
-
-                    const allText = finalResult.content
-                        ?.filter(item => item.type === "text")
-                        .map(item => item.text)
-                        .join("\n") || '';
-
-                    const grants = extractJsonArray(allText);
-
-                    if (grants && Array.isArray(grants)) {
-                        let filtered = grants;
-
-                        if (filters.minAmount) {
-                            filtered = filtered.filter(g => parseAmount(g.amount) >= parseInt(filters.minAmount));
-                        }
-                        if (filters.maxAmount) {
-                            filtered = filtered.filter(g => parseAmount(g.amount) <= parseInt(filters.maxAmount));
-                        }
-                        if (filters.successRate !== 'any') {
-                            filtered = filtered.filter(g => {
-                                if (g.successRate === 'Not available') return filters.successRate === 'unknown';
-                                const rate = parseFloat(g.successRate);
-                                if (filters.successRate === 'high') return rate >= 30;
-                                if (filters.successRate === 'medium') return rate >= 15 && rate < 30;
-                                if (filters.successRate === 'low') return rate < 15;
-                                return true;
-                            });
-                        }
-
-                        setResults(filtered);
-                        if (filtered.length === 0) {
-                            setError("The search completed but no grants matched your filters. Try widening your criteria.");
-                        }
-                    } else {
-                        setError("Could not parse the grant results. Showing the raw AI response below for debugging.");
-                        setDebugText(allText || '(empty response)');
-                    }
+                    handleResult(result.data);
                 } catch (err) {
                     setError(`Search error: ${err.message}`);
                     console.error('Error:', err);
@@ -211,11 +227,26 @@
                 }
             };
 
-            const parseAmount = (amountStr) => {
-                if (!amountStr) return 0;
-                const numbers = amountStr.match(/\d+(?:,\d+)*/g);
-                if (!numbers) return 0;
-                return parseInt(numbers[0].replace(/,/g, ''));
+            const checkAgain = async () => {
+                if (!pendingJobId) return;
+                setIsSearching(true);
+                setError(null);
+                setStatusMessage('Checking on your search...');
+                cancelRef.current = false;
+
+                try {
+                    const result = await pollJob(pendingJobId, 60);
+                    if (!result.done) {
+                        throw new Error('Still not finished. You can wait a bit longer and check again, or start a fresh search.');
+                    }
+                    setPendingJobId(null);
+                    handleResult(result.data);
+                } catch (err) {
+                    setError(`Search error: ${err.message}`);
+                } finally {
+                    setIsSearching(false);
+                    setStatusMessage('');
+                }
             };
 
             return (
@@ -434,6 +465,28 @@
                                     </>
                                 )}
                             </button>
+
+                            {pendingJobId && !isSearching && (
+                                <button
+                                    onClick={checkAgain}
+                                    style={{
+                                        marginTop: '0.75rem',
+                                        width: '100%',
+                                        padding: '0.85rem',
+                                        background: 'transparent',
+                                        border: '1px solid #f39c12',
+                                        borderRadius: '8px',
+                                        color: '#f39c12',
+                                        fontSize: '1rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        fontFamily: "'Inter', sans-serif"
+                                    }}
+                                >
+                                    Check again on previous search
+                                </button>
+                            )}
+
                             {isSearching && (
                                 <p style={{
                                     marginTop: '0.75rem',
@@ -442,7 +495,7 @@
                                     textAlign: 'center',
                                     fontFamily: "'Inter', sans-serif"
                                 }}>
-                                    This can take 20-40 seconds since Claude is searching the live web.
+                                    Real web searches can take up to a couple of minutes — the job keeps running even if you close this tab.
                                 </p>
                             )}
                         </div>
