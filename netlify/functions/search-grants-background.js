@@ -1,5 +1,3 @@
-// This file MUST be named with a "-background" suffix — that's what tells
-// Netlify to run it as a Background Function (up to 15 minutes, no 10s cap).
 const { getStore } = require("@netlify/blobs");
 
 exports.handler = async function (event, context) {
@@ -31,24 +29,7 @@ exports.handler = async function (event, context) {
     if (filters.location === 'australia') locationText = 'Australia';
     else if (filters.location === 'international') locationText = 'International (outside Australia)';
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-5",
-        max_tokens: 4000,
-        tools: [{
-          type: "web_search_20250305",
-          name: "web_search",
-          max_uses: 3
-        }],
-        messages: [{
-          role: "user",
-          content: `Search for current grant opportunities for Early Career Researchers in Business and Law. Find grants that are currently open (closing date has not passed, currently accepting applications in ${currentMonth} ${currentYear}).
+    const initialPrompt = `Search for current grant opportunities for Early Career Researchers in Business and Law. Find grants that are currently open (closing date has not passed, currently accepting applications in ${currentMonth} ${currentYear}).
 
 Location focus: ${locationText}
 
@@ -75,24 +56,80 @@ After searching, output ONLY a JSON array — no markdown fences, no preamble, n
   "description": "Brief description"
 }]
 
-Find 4-6 grants specifically for Business, Law, or related social sciences fields. Only include grants with future closing dates.`
-        }]
-      })
-    });
+Find exactly 4 grants specifically for Business, Law, or related social sciences fields. Only include grants with future closing dates. Do this efficiently — use at most 2 searches total, then write your final JSON answer.`;
 
-    console.log(`[${jobId}] API response status:`, response.status);
+    let messages = [{ role: "user", content: initialPrompt }];
+    let finalData = null;
+    const MAX_CONTINUATIONS = 4;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.log(`[${jobId}] API error:`, errorText);
-      await store.setJSON(jobId, { status: "error", error: `API error: ${errorText}` });
+    for (let attempt = 0; attempt <= MAX_CONTINUATIONS; attempt++) {
+      console.log(`[${jobId}] API call attempt ${attempt + 1}`);
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-5",
+          max_tokens: 8000, // generous budget so the final JSON never gets starved out
+          tools: [{
+            type: "web_search_20250305",
+            name: "web_search",
+            max_uses: 2
+          }],
+          messages
+        })
+      });
+
+      console.log(`[${jobId}] API response status:`, response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log(`[${jobId}] API error:`, errorText);
+        await store.setJSON(jobId, { status: "error", error: `API error: ${errorText}` });
+        return;
+      }
+
+      const data = await response.json();
+      console.log(`[${jobId}] stop_reason:`, data.stop_reason);
+
+      if (data.stop_reason === 'pause_turn') {
+        // Long-running turn was paused by the API mid-way through search.
+        // Continue by feeding the assistant's partial turn back in.
+        messages = [...messages, { role: 'assistant', content: data.content }];
+        continue;
+      }
+
+      finalData = data;
+      break;
+    }
+
+    if (!finalData) {
+      await store.setJSON(jobId, {
+        status: "error",
+        error: "The search kept getting paused and did not complete after several continuations."
+      });
       return;
     }
 
-    const data = await response.json();
-    console.log(`[${jobId}] Success! Stop reason:`, data.stop_reason);
+    // Sanity check: make sure there's actually a text block before declaring success
+    const hasText = finalData.content?.some(block => block.type === 'text' && block.text?.trim().length > 0);
 
-    await store.setJSON(jobId, { status: "done", data });
+    if (!hasText) {
+      console.log(`[${jobId}] No text block in final response. stop_reason: ${finalData.stop_reason}`);
+      await store.setJSON(jobId, {
+        status: "error",
+        error: `The AI finished (reason: ${finalData.stop_reason}) but didn't write a text answer — only tool activity. This usually means it ran out of token budget mid-search. Try narrowing your filters.`,
+        rawContentTypes: finalData.content?.map(b => b.type)
+      });
+      return;
+    }
+
+    console.log(`[${jobId}] Success!`);
+    await store.setJSON(jobId, { status: "done", data: finalData });
 
   } catch (error) {
     console.log("Background function error:", error.message);
