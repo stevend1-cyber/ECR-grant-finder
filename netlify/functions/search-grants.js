@@ -33,43 +33,41 @@ exports.handler = async (event, context) => {
     const currentYear = new Date().getFullYear();
     const currentMonth = new Date().toLocaleString('default', { month: 'long' });
 
-    let searchQuery = `ECR grants Business Law ${currentYear} open`;
+    let locationText = 'Both Australia and International';
+    if (filters.location === 'australia') locationText = 'Australia';
+    else if (filters.location === 'international') locationText = 'International (outside Australia)';
 
-    if (filters.location === 'australia') {
-      searchQuery += ' Australia';
-    } else if (filters.location === 'international') {
-      searchQuery += ' international';
-    }
+    console.log('Calling Anthropic API (single search, capped tokens)...');
 
-    console.log('Calling API with query:', searchQuery);
+    // Race the API call against a manual timeout so we fail fast with a clear
+    // error instead of waiting for Netlify to kill the connection abruptly.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 9000);
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-5",
-        max_tokens: 3000, // bumped up so JSON doesn't get truncated
-        tools: [{
-          type: "web_search_20250305",
-          name: "web_search"
-        }],
-        messages: [{
-          role: "user",
-          content: `Find 3-5 current grant opportunities for Early Career Researchers in Business/Law. Open in ${currentMonth} ${currentYear}.
+    let response;
+    try {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: "claude-sonnet-5",
+          max_tokens: 1500,
+          tools: [{
+            type: "web_search_20250305",
+            name: "web_search",
+            max_uses: 1 // CRITICAL: caps latency by allowing only one search round-trip
+          }],
+          messages: [{
+            role: "user",
+            content: `Do exactly ONE web search to find 3 current grant opportunities for Early Career Researchers in Business/Law, open in ${currentMonth} ${currentYear}. Location: ${locationText}.
 
-Location: ${filters.location === 'australia' ? 'Australia' : filters.location === 'international' ? 'International' : 'Both'}
+After the search, immediately output ONLY a JSON array — no markdown fences, no preamble, no closing remarks. Be extremely concise in every field.
 
-CRITICAL FORMATTING RULES:
-- Your ENTIRE final response must be ONLY a JSON array. Nothing before it, nothing after it.
-- Do NOT wrap it in markdown code fences (no \`\`\`).
-- Do NOT include any explanation, preamble, or closing remarks.
-- Keep each field short so the full array fits well within the token budget.
-
-Format:
 [{
   "name": "Grant Name",
   "organization": "Organization",
@@ -79,13 +77,16 @@ Format:
   "successRate": "XX% or Not available",
   "url": "https://...",
   "location": "Australia or International",
-  "description": "One sentence description"
+  "description": "One short sentence"
 }]
 
-Only include grants with future closing dates.`
-        }]
-      })
-    });
+Exactly 3 grants, all with future closing dates.`
+          }]
+        })
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     console.log('API response:', response.status);
 
@@ -110,10 +111,15 @@ Only include grants with future closing dates.`
 
   } catch (error) {
     console.log('Error:', error.message);
+    const isTimeout = error.name === 'AbortError';
     return {
-      statusCode: 500,
+      statusCode: isTimeout ? 504 : 500,
       headers,
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({
+        error: isTimeout
+          ? 'The AI search took too long and was stopped before the platform timeout could cut it off ungracefully. Try again, or consider narrowing filters further.'
+          : error.message
+      })
     };
   }
 };
