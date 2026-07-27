@@ -210,11 +210,19 @@
 
                     setStatusMessage('Searching the web for current grants...');
 
-                    const result = await pollJob(jobId, 90);
+                    // Wait up to ~7 minutes in one go — background functions can run
+                    // up to 15 minutes, and this avoids making the user manually
+                    // click "check again" for a normal-but-slow search.
+                    const result = await pollJob(jobId, 210);
 
                     if (!result.done) {
                         setPendingJobId(jobId);
-                        throw new Error('The search is taking longer than expected (over 3 minutes). It may still finish in the background — click "Check again" below rather than starting a new search.');
+                        if (cancelRef.current) {
+                            setError('Search paused. Click "Check again" below to see if it finished, or start a fresh search.');
+                        } else {
+                            throw new Error('This search is unusually slow (over 7 minutes). It may still finish — click "Check again" below, or try narrowing your filters.');
+                        }
+                        return;
                     }
 
                     handleResult(result.data);
@@ -235,7 +243,7 @@
                 cancelRef.current = false;
 
                 try {
-                    const result = await pollJob(pendingJobId, 60);
+                    const result = await pollJob(pendingJobId, 90);
                     if (!result.done) {
                         throw new Error('Still not finished. You can wait a bit longer and check again, or start a fresh search.');
                     }
@@ -247,6 +255,12 @@
                     setIsSearching(false);
                     setStatusMessage('');
                 }
+            };
+
+            const cancelSearch = () => {
+                cancelRef.current = true;
+                setIsSearching(false);
+                setStatusMessage('');
             };
 
             return (
@@ -465,6 +479,27 @@
                                     </>
                                 )}
                             </button>
+
+                            {isSearching && (
+                                <button
+                                    onClick={cancelSearch}
+                                    style={{
+                                        marginTop: '0.75rem',
+                                        width: '100%',
+                                        padding: '0.75rem',
+                                        background: 'transparent',
+                                        border: '1px solid #666',
+                                        borderRadius: '8px',
+                                        color: '#aaa',
+                                        fontSize: '0.9rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        fontFamily: "'Inter', sans-serif"
+                                    }}
+                                >
+                                    Cancel waiting
+                                </button>
+                            )}
 
                             {pendingJobId && !isSearching && (
                                 <button
