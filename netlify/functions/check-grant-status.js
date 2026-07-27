@@ -1,6 +1,10 @@
-const { getStore } = require("@netlify/blobs");
+const { getStore, connectLambda } = require("@netlify/blobs");
 
 exports.handler = async function (event, context) {
+  // REQUIRED in Lambda-compatibility mode (classic exports.handler functions) —
+  // without this, getStore() throws on every single invocation.
+  connectLambda(event);
+
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
