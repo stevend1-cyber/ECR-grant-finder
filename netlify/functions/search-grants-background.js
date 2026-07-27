@@ -60,7 +60,7 @@ Find exactly 4 grants specifically for Business, Law, or related social sciences
 
     let messages = [{ role: "user", content: initialPrompt }];
     let finalData = null;
-    const MAX_CONTINUATIONS = 4;
+    const MAX_CONTINUATIONS = 2;
 
     for (let attempt = 0; attempt <= MAX_CONTINUATIONS; attempt++) {
       console.log(`[${jobId}] API call attempt ${attempt + 1}`);
