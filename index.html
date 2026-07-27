@@ -20,7 +20,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState } = React;
+        const { useState, useRef } = React;
 
         const Search = ({ size = 24, color = 'currentColor', style = {} }) => (
             <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -79,6 +79,11 @@
             </svg>
         );
 
+        // Generate a job id without relying on crypto.randomUUID (not available on all setups)
+        const generateJobId = () => {
+            return 'job-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+        };
+
         function GrantSearchAgent() {
             const [filters, setFilters] = useState({
                 location: 'australia',
@@ -90,67 +95,82 @@
             const [isSearching, setIsSearching] = useState(false);
             const [error, setError] = useState(null);
             const [debugText, setDebugText] = useState(null);
+            const [statusMessage, setStatusMessage] = useState('');
+            const cancelRef = useRef(false);
 
-            // Extract the JSON array from Claude's text response, tolerating
-            // markdown code fences and stray leading/trailing text.
             const extractJsonArray = (rawText) => {
-                // Strip markdown code fences if present
                 let cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-
                 const firstBracket = cleaned.indexOf('[');
                 const lastBracket = cleaned.lastIndexOf(']');
-
-                if (firstBracket === -1 || lastBracket === -1 || lastBracket < firstBracket) {
-                    return null;
-                }
-
+                if (firstBracket === -1 || lastBracket === -1 || lastBracket < firstBracket) return null;
                 const candidate = cleaned.substring(firstBracket, lastBracket + 1);
-
                 try {
                     return JSON.parse(candidate);
                 } catch (e) {
-                    // If parsing fails, the response was likely truncated mid-array.
-                    // Try trimming back to the last complete object as a fallback.
                     const lastCompleteObject = candidate.lastIndexOf('},');
                     if (lastCompleteObject !== -1) {
                         const repaired = candidate.substring(0, lastCompleteObject + 1) + ']';
-                        try {
-                            return JSON.parse(repaired);
-                        } catch (e2) {
-                            return null;
-                        }
+                        try { return JSON.parse(repaired); } catch (e2) { return null; }
                     }
                     return null;
                 }
             };
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
             const searchGrants = async () => {
                 setIsSearching(true);
                 setError(null);
                 setDebugText(null);
                 setResults([]);
+                setStatusMessage('Starting search...');
+                cancelRef.current = false;
+
+                const jobId = generateJobId();
 
                 try {
-                    const response = await fetch("/.netlify/functions/search-grants", {
+                    // Kick off the background function. It returns 202 almost instantly
+                    // and keeps working for up to 15 minutes behind the scenes.
+                    await fetch("/.netlify/functions/search-grants-background", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ filters })
+                        body: JSON.stringify({ jobId, filters })
                     });
 
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(`Function error (${response.status}): ${errorText}`);
+                    setStatusMessage('Searching the web for current grants...');
+
+                    // Poll the fast status-check function every 2 seconds
+                    const maxAttempts = 45; // ~90 seconds
+                    let attempt = 0;
+                    let finalResult = null;
+
+                    while (attempt < maxAttempts && !cancelRef.current) {
+                        await sleep(2000);
+                        attempt++;
+
+                        const statusResponse = await fetch(`/.netlify/functions/check-grant-status?jobId=${jobId}`);
+                        if (!statusResponse.ok) continue;
+
+                        const statusData = await statusResponse.json();
+
+                        if (statusData.status === 'done') {
+                            finalResult = statusData.data;
+                            break;
+                        } else if (statusData.status === 'error') {
+                            throw new Error(statusData.error);
+                        }
+                        // else still pending — keep polling
+                        setStatusMessage(`Still searching... (${attempt * 2}s)`);
                     }
 
-                    const data = await response.json();
-                    console.log('Full API response:', data);
+                    if (!finalResult) {
+                        throw new Error('The search is taking longer than expected. It may still finish in the background — try again in a moment.');
+                    }
 
-                    const allText = data.content
+                    const allText = finalResult.content
                         ?.filter(item => item.type === "text")
                         .map(item => item.text)
                         .join("\n") || '';
-
-                    console.log('Extracted text:', allText);
 
                     const grants = extractJsonArray(allText);
 
@@ -160,11 +180,9 @@
                         if (filters.minAmount) {
                             filtered = filtered.filter(g => parseAmount(g.amount) >= parseInt(filters.minAmount));
                         }
-
                         if (filters.maxAmount) {
                             filtered = filtered.filter(g => parseAmount(g.amount) <= parseInt(filters.maxAmount));
                         }
-
                         if (filters.successRate !== 'any') {
                             filtered = filtered.filter(g => {
                                 if (g.successRate === 'Not available') return filters.successRate === 'unknown';
@@ -177,20 +195,19 @@
                         }
 
                         setResults(filtered);
-
                         if (filtered.length === 0) {
                             setError("The search completed but no grants matched your filters. Try widening your criteria.");
                         }
                     } else {
-                        setError("Could not parse the grant results. Showing the raw AI response below for debugging — check if it got cut off or included extra text.");
+                        setError("Could not parse the grant results. Showing the raw AI response below for debugging.");
                         setDebugText(allText || '(empty response)');
-                        console.error('Failed to parse JSON from:', allText);
                     }
                 } catch (err) {
                     setError(`Search error: ${err.message}`);
                     console.error('Error:', err);
                 } finally {
                     setIsSearching(false);
+                    setStatusMessage('');
                 }
             };
 
@@ -408,7 +425,7 @@
                                 {isSearching ? (
                                     <>
                                         <Loader2 size={20} />
-                                        Searching Current Grants...
+                                        {statusMessage || 'Searching...'}
                                     </>
                                 ) : (
                                     <>
@@ -417,6 +434,17 @@
                                     </>
                                 )}
                             </button>
+                            {isSearching && (
+                                <p style={{
+                                    marginTop: '0.75rem',
+                                    fontSize: '0.85rem',
+                                    color: '#888',
+                                    textAlign: 'center',
+                                    fontFamily: "'Inter', sans-serif"
+                                }}>
+                                    This can take 20-40 seconds since Claude is searching the live web.
+                                </p>
+                            )}
                         </div>
 
                         {error && (
