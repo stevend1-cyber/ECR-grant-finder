@@ -73,7 +73,7 @@ Find exactly 4 grants specifically for Business, Law, or related social sciences
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-5",
+          model: "claude-haiku-4-5-20251001", // faster model — this task is mostly search + formatting, not deep reasoning
           max_tokens: 8000, // generous budget so the final JSON never gets starved out
           tools: [{
             type: "web_search_20250305",
