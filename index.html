@@ -89,24 +89,53 @@
             const [results, setResults] = useState([]);
             const [isSearching, setIsSearching] = useState(false);
             const [error, setError] = useState(null);
+            const [debugText, setDebugText] = useState(null);
+
+            // Extract the JSON array from Claude's text response, tolerating
+            // markdown code fences and stray leading/trailing text.
+            const extractJsonArray = (rawText) => {
+                // Strip markdown code fences if present
+                let cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+                const firstBracket = cleaned.indexOf('[');
+                const lastBracket = cleaned.lastIndexOf(']');
+
+                if (firstBracket === -1 || lastBracket === -1 || lastBracket < firstBracket) {
+                    return null;
+                }
+
+                const candidate = cleaned.substring(firstBracket, lastBracket + 1);
+
+                try {
+                    return JSON.parse(candidate);
+                } catch (e) {
+                    // If parsing fails, the response was likely truncated mid-array.
+                    // Try trimming back to the last complete object as a fallback.
+                    const lastCompleteObject = candidate.lastIndexOf('},');
+                    if (lastCompleteObject !== -1) {
+                        const repaired = candidate.substring(0, lastCompleteObject + 1) + ']';
+                        try {
+                            return JSON.parse(repaired);
+                        } catch (e2) {
+                            return null;
+                        }
+                    }
+                    return null;
+                }
+            };
 
             const searchGrants = async () => {
                 setIsSearching(true);
                 setError(null);
+                setDebugText(null);
                 setResults([]);
 
                 try {
-                    console.log('Calling function...');
-                    
                     const response = await fetch("/.netlify/functions/search-grants", {
                         method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
+                        headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ filters })
                     });
-
-                    console.log('Response status:', response.status);
 
                     if (!response.ok) {
                         const errorText = await response.text();
@@ -114,9 +143,8 @@
                     }
 
                     const data = await response.json();
-                    console.log('Data received:', data);
-                    
-                    // Extract text from content blocks
+                    console.log('Full API response:', data);
+
                     const allText = data.content
                         ?.filter(item => item.type === "text")
                         .map(item => item.text)
@@ -124,29 +152,19 @@
 
                     console.log('Extracted text:', allText);
 
-                    // Try to find JSON in the response
-                    let jsonMatch = allText.match(/\[[\s\S]*\]/);
-                    if (jsonMatch) {
-                        const grants = JSON.parse(jsonMatch[0]);
-                        console.log('Parsed grants:', grants);
-                        
-                        // Apply filters
+                    const grants = extractJsonArray(allText);
+
+                    if (grants && Array.isArray(grants)) {
                         let filtered = grants;
-                        
+
                         if (filters.minAmount) {
-                            filtered = filtered.filter(g => {
-                                const amount = parseAmount(g.amount);
-                                return amount >= parseInt(filters.minAmount);
-                            });
+                            filtered = filtered.filter(g => parseAmount(g.amount) >= parseInt(filters.minAmount));
                         }
-                        
+
                         if (filters.maxAmount) {
-                            filtered = filtered.filter(g => {
-                                const amount = parseAmount(g.amount);
-                                return amount <= parseInt(filters.maxAmount);
-                            });
+                            filtered = filtered.filter(g => parseAmount(g.amount) <= parseInt(filters.maxAmount));
                         }
-                        
+
                         if (filters.successRate !== 'any') {
                             filtered = filtered.filter(g => {
                                 if (g.successRate === 'Not available') return filters.successRate === 'unknown';
@@ -157,11 +175,16 @@
                                 return true;
                             });
                         }
-                        
+
                         setResults(filtered);
+
+                        if (filtered.length === 0) {
+                            setError("The search completed but no grants matched your filters. Try widening your criteria.");
+                        }
                     } else {
-                        setError("Could not parse grant results. The AI response format was unexpected.");
-                        console.error('No JSON found in response');
+                        setError("Could not parse the grant results. Showing the raw AI response below for debugging — check if it got cut off or included extra text.");
+                        setDebugText(allText || '(empty response)');
+                        console.error('Failed to parse JSON from:', allText);
                     }
                 } catch (err) {
                     setError(`Search error: ${err.message}`);
@@ -172,6 +195,7 @@
             };
 
             const parseAmount = (amountStr) => {
+                if (!amountStr) return 0;
                 const numbers = amountStr.match(/\d+(?:,\d+)*/g);
                 if (!numbers) return 0;
                 return parseInt(numbers[0].replace(/,/g, ''));
@@ -365,7 +389,7 @@
                                     marginTop: '1.5rem',
                                     width: '100%',
                                     padding: '1rem',
-                                    background: isSearching 
+                                    background: isSearching
                                         ? 'linear-gradient(135deg, #666 0%, #888 100%)'
                                         : 'linear-gradient(135deg, #e94560 0%, #f39c12 100%)',
                                     border: 'none',
@@ -405,6 +429,24 @@
                                 color: '#ff6b6b'
                             }}>
                                 {error}
+                            </div>
+                        )}
+
+                        {debugText && (
+                            <div style={{
+                                background: 'rgba(0,0,0,0.4)',
+                                border: '1px solid #666',
+                                borderRadius: '12px',
+                                padding: '1rem',
+                                marginBottom: '2rem',
+                                color: '#ccc',
+                                fontFamily: 'monospace',
+                                fontSize: '0.85rem',
+                                whiteSpace: 'pre-wrap',
+                                maxHeight: '300px',
+                                overflowY: 'auto'
+                            }}>
+                                {debugText}
                             </div>
                         )}
 
@@ -448,8 +490,8 @@
                                                     {grant.name}
                                                 </h3>
                                                 <span style={{
-                                                    background: grant.location === 'Australia' 
-                                                        ? 'rgba(243, 156, 18, 0.2)' 
+                                                    background: grant.location === 'Australia'
+                                                        ? 'rgba(243, 156, 18, 0.2)'
                                                         : 'rgba(52, 152, 219, 0.2)',
                                                     color: grant.location === 'Australia' ? '#f39c12' : '#3498db',
                                                     padding: '0.5rem 1rem',
