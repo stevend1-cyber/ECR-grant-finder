@@ -18,7 +18,7 @@ exports.handler = async (event, context) => {
 
   try {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    
+
     if (!apiKey) {
       return {
         statusCode: 500,
@@ -29,12 +29,12 @@ exports.handler = async (event, context) => {
 
     const { filters } = JSON.parse(event.body);
     console.log('Filters:', filters);
-    
+
     const currentYear = new Date().getFullYear();
     const currentMonth = new Date().toLocaleString('default', { month: 'long' });
-    
+
     let searchQuery = `ECR grants Business Law ${currentYear} open`;
-    
+
     if (filters.location === 'australia') {
       searchQuery += ' Australia';
     } else if (filters.location === 'international') {
@@ -51,8 +51,8 @@ exports.handler = async (event, context) => {
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-5", // UPDATED: current model as of July 2026
-        max_tokens: 2000,
+        model: "claude-sonnet-5",
+        max_tokens: 3000, // bumped up so JSON doesn't get truncated
         tools: [{
           type: "web_search_20250305",
           name: "web_search"
@@ -63,7 +63,13 @@ exports.handler = async (event, context) => {
 
 Location: ${filters.location === 'australia' ? 'Australia' : filters.location === 'international' ? 'International' : 'Both'}
 
-Return ONLY this JSON (no markdown):
+CRITICAL FORMATTING RULES:
+- Your ENTIRE final response must be ONLY a JSON array. Nothing before it, nothing after it.
+- Do NOT wrap it in markdown code fences (no \`\`\`).
+- Do NOT include any explanation, preamble, or closing remarks.
+- Keep each field short so the full array fits well within the token budget.
+
+Format:
 [{
   "name": "Grant Name",
   "organization": "Organization",
@@ -76,7 +82,7 @@ Return ONLY this JSON (no markdown):
   "description": "One sentence description"
 }]
 
-Only include grants with future closing dates. Keep it concise.`
+Only include grants with future closing dates.`
         }]
       })
     });
@@ -94,8 +100,8 @@ Only include grants with future closing dates. Keep it concise.`
     }
 
     const data = await response.json();
-    console.log('Success!');
-    
+    console.log('Success! Stop reason:', data.stop_reason);
+
     return {
       statusCode: 200,
       headers,
