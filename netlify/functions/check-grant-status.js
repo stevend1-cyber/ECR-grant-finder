@@ -23,7 +23,7 @@ exports.handler = async function (event, context) {
   }
 
   try {
-    const store = getStore({ name: "grant-jobs", consistency: "strong" });
+    const store = getStore({ name: "grant-jobs" });
     const result = await store.get(jobId, { type: "json" });
 
     if (!result) {
