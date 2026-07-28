@@ -60,7 +60,13 @@ After searching, output ONLY a JSON array — no markdown fences, no preamble, n
   "description": "Brief description"
 }]
 
-Find exactly 4 grants specifically for Business, Law, or related social sciences fields. Only include grants with future closing dates. Do this efficiently — use at most 2 searches total, then write your final JSON answer.`;
+Find up to 4 grants specifically for Business, Law, or related social sciences fields. Only include grants with future closing dates.
+
+If you can only find 1, 2, or 3 grants that genuinely meet these criteria, return just those — do not pad the list with grants that don't fit (wrong field, or closing date already passed). If you find zero qualifying grants, return an empty array: []
+
+CRITICAL: Your response must ALWAYS be a JSON array, even if empty. Never respond with a prose explanation of why you couldn't find grants instead of JSON — an empty array [] is a perfectly valid and expected answer when the search space is genuinely limited right now.
+
+Do this efficiently — use at most 2 searches total, then write your final JSON answer.`;
 
     let messages = [{ role: "user", content: initialPrompt }];
     let finalData = null;
