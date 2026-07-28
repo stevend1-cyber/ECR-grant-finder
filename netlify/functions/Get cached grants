@@ -1,0 +1,52 @@
+const { getStore, connectLambda } = require("@netlify/blobs");
+
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+exports.handler = async function (event, context) {
+  connectLambda(event);
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS'
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
+
+  const params = event.queryStringParameters || {};
+  const location = params.location || 'both';
+  const discipline = params.discipline || 'both';
+  const cacheKey = `cache:${location}:${discipline}`;
+
+  try {
+    const store = getStore({ name: "grant-jobs" });
+    const cached = await store.get(cacheKey, { type: "json" });
+
+    if (!cached) {
+      return { statusCode: 200, headers, body: JSON.stringify({ cached: false }) };
+    }
+
+    const age = Date.now() - cached.timestamp;
+    if (age > CACHE_TTL_MS) {
+      return { statusCode: 200, headers, body: JSON.stringify({ cached: false }) };
+    }
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        cached: true,
+        ageMinutes: Math.round(age / 60000),
+        data: cached.data
+      })
+    };
+  } catch (error) {
+    console.log('Cache check error:', error.message);
+    // Fail open — if the cache check itself errors, just report no cache
+    // rather than blocking the search.
+    return { statusCode: 200, headers, body: JSON.stringify({ cached: false }) };
+  }
+};
