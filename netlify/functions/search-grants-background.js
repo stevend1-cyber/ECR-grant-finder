@@ -1,5 +1,13 @@
 const { getStore, connectLambda } = require("@netlify/blobs");
 
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function buildCacheKey(filters) {
+  const location = filters.location || 'both';
+  const discipline = filters.discipline || 'both';
+  return `cache:${location}:${discipline}`;
+}
+
 exports.handler = async function (event, context) {
   // REQUIRED in Lambda-compatibility mode (classic exports.handler functions) —
   // without this, getStore() throws on every single invocation.
@@ -33,15 +41,22 @@ exports.handler = async function (event, context) {
     if (filters.location === 'australia') locationText = 'Australia';
     else if (filters.location === 'international') locationText = 'International (outside Australia)';
 
-    const initialPrompt = `Search for current grant opportunities for Early Career Researchers in Business and Law. Find grants that are currently open (closing date has not passed, currently accepting applications in ${currentMonth} ${currentYear}).
+    let disciplineText = 'Business and Law (both fields, or closely related social sciences)';
+    if (filters.discipline === 'business') disciplineText = 'Business only (not Law)';
+    else if (filters.discipline === 'law') disciplineText = 'Law only (not Business)';
+
+    const initialPrompt = `Search for current grant opportunities for Early Career Researchers in ${filters.discipline === 'business' ? 'Business' : filters.discipline === 'law' ? 'Law' : 'Business and Law'}. Find grants that are currently open (closing date has not passed, currently accepting applications in ${currentMonth} ${currentYear}).
 
 Location focus: ${locationText}
+Discipline focus: ${disciplineText}
+
+Prioritize checking well-known grant sources where relevant, such as GrantConnect (grants.gov.au), the Australian Research Council (arc.gov.au), university research offices (e.g. Edith Cowan University, UWA, Melbourne, UNSW), and relevant philanthropic or industry funding bodies, alongside general web search.
 
 For each grant found, extract:
 1. Grant name/title
 2. Funding body/organization
 3. Amount/funding range
-4. Closing date (must be in the future)
+4. Closing date (must be in the future) — use a clear, unambiguous format like "15 March 2027"
 5. Eligibility criteria (especially for Early Career Researchers)
 6. Success rate if available
 7. URL/link to apply
@@ -52,7 +67,7 @@ After searching, output ONLY a JSON array — no markdown fences, no preamble, n
   "name": "Grant Name",
   "organization": "Funding Body",
   "amount": "Amount range or specific amount",
-  "closingDate": "Date string",
+  "closingDate": "Date string, e.g. 15 March 2027",
   "eligibility": "Brief eligibility summary",
   "successRate": "Percentage or 'Not available'",
   "url": "Application URL",
@@ -60,7 +75,7 @@ After searching, output ONLY a JSON array — no markdown fences, no preamble, n
   "description": "Brief description"
 }]
 
-Find up to 4 grants specifically for Business, Law, or related social sciences fields. Only include grants with future closing dates.
+Find up to 4 grants matching the discipline focus above. Only include grants with future closing dates.
 
 If you can only find 1, 2, or 3 grants that genuinely meet these criteria, return just those — do not pad the list with grants that don't fit (wrong field, or closing date already passed). If you find zero qualifying grants, return an empty array: []
 
@@ -158,7 +173,15 @@ Do this efficiently — use at most 2 searches total, then write your final JSON
     }
 
     console.log(`[${jobId}] Success!`);
-    await store.setJSON(jobId, { status: "done", data: finalData });
+    const resultPayload = { status: "done", data: finalData };
+    await store.setJSON(jobId, resultPayload);
+
+    // Also write to the cache key for this filter combination, so future
+    // searches with the same location+discipline can skip straight to a
+    // cached result instead of triggering a fresh AI search.
+    const cacheKey = buildCacheKey(filters);
+    await store.setJSON(cacheKey, { timestamp: Date.now(), data: finalData });
+    console.log(`[${jobId}] Cached under key: ${cacheKey}`);
 
   } catch (error) {
     console.log("Background function error:", error.message);
