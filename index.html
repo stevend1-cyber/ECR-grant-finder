@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grant Intelligence - AI-Powered Grant Search</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { margin: 0; padding: 0; overflow-x: hidden; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        input::placeholder { color: #666; }
+        select option { background: #1a1a2e; color: #e8e8e8; }
+
+        @media print {
+            body * {
+                color: #111 !important;
+                background: transparent !important;
+                box-shadow: none !important;
+                text-shadow: none !important;
+                -webkit-text-fill-color: #111 !important;
+            }
+            body {
+                background: white !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .grant-card {
+                border: 1px solid #ccc !important;
+                break-inside: avoid;
+                page-break-inside: avoid;
+                margin-bottom: 1rem;
+            }
+            a {
+                color: #26b298 !important;
+                text-decoration: underline !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        const Search = ({ size = 24, color = 'currentColor', style = {} }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+            </svg>
+        );
+
+        const Filter = ({ size = 24, color = 'currentColor' }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+            </svg>
+        );
+
+        const MapPin = ({ size = 24, color = 'currentColor', style = {} }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+        );
+
+        const DollarSign = ({ size = 24, color = 'currentColor', style = {} }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <line x1="12" y1="1" x2="12" y2="23"></line>
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+        );
+
+        const TrendingUp = ({ size = 24, color = 'currentColor', style = {} }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                <polyline points="17 6 23 6 23 12"></polyline>
+            </svg>
+        );
+
+        const Calendar = ({ size = 24, color = 'currentColor', style = {} }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+        );
+
+        const ExternalLink = ({ size = 24, color = 'currentColor' }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+        );
+
+        const Loader2 = ({ size = 24, color = 'currentColor', style = {} }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{...style, animation: 'spin 1s linear infinite'}}>
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+            </svg>
+        );
+
+        const generateJobId = () => {
+            return 'job-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+        };
+
+        const grantKey = (g) => `${g.name}|${g.organization}`;
+
+        function GrantSearchAgent() {
+            const [filters, setFilters] = useState({
+                location: 'australia',
+                discipline: 'both',
+                minAmount: '',
+                maxAmount: '',
+                successRate: 'any'
+            });
+            const [sortBy, setSortBy] = useState('closing');
+            const [forceRefresh, setForceRefresh] = useState(false);
+            const [results, setResults] = useState([]);
+            const [isSearching, setIsSearching] = useState(false);
+            const [error, setError] = useState(null);
+            const [debugText, setDebugText] = useState(null);
+            const [statusMessage, setStatusMessage] = useState('');
+            const [pendingJobId, setPendingJobId] = useState(null);
+            const [cacheInfo, setCacheInfo] = useState(null);
+            const [savedGrants, setSavedGrants] = useState(() => {
+                try {
+                    return JSON.parse(localStorage.getItem('savedGrants') || '[]');
+                } catch (e) {
+                    return [];
+                }
+            });
+            const [showSaved, setShowSaved] = useState(false);
+            const cancelRef = useRef(false);
+
+            // Read filters from the URL on load, so a shared link reproduces the same search
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                setFilters(prev => ({
+                    location: params.get('location') || prev.location,
+                    discipline: params.get('discipline') || prev.discipline,
+                    minAmount: params.get('minAmount') || prev.minAmount,
+                    maxAmount: params.get('maxAmount') || prev.maxAmount,
+                    successRate: params.get('successRate') || prev.successRate
+                }));
+                if (params.get('sortBy')) setSortBy(params.get('sortBy'));
+            }, []);
+
+            const updateUrl = (currentFilters, currentSort) => {
+                const params = new URLSearchParams();
+                params.set('location', currentFilters.location);
+                params.set('discipline', currentFilters.discipline);
+                if (currentFilters.minAmount) params.set('minAmount', currentFilters.minAmount);
+                if (currentFilters.maxAmount) params.set('maxAmount', currentFilters.maxAmount);
+                if (currentFilters.successRate !== 'any') params.set('successRate', currentFilters.successRate);
+                params.set('sortBy', currentSort);
+                window.history.replaceState({}, '', '?' + params.toString());
+            };
+
+            const extractJsonArray = (rawText) => {
+                let cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                const firstBracket = cleaned.indexOf('[');
+                const lastBracket = cleaned.lastIndexOf(']');
+                if (firstBracket === -1 || lastBracket === -1 || lastBracket < firstBracket) return null;
+                const candidate = cleaned.substring(firstBracket, lastBracket + 1);
+                try {
+                    return JSON.parse(candidate);
+                } catch (e) {
+                    const lastCompleteObject = candidate.lastIndexOf('},');
+                    if (lastCompleteObject !== -1) {
+                        const repaired = candidate.substring(0, lastCompleteObject + 1) + ']';
+                        try { return JSON.parse(repaired); } catch (e2) { return null; }
+                    }
+                    return null;
+                }
+            };
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            const parseAmount = (amountStr) => {
+                if (!amountStr) return 0;
+                const numbers = amountStr.match(/\d+(?:,\d+)*/g);
+                if (!numbers) return 0;
+                return parseInt(numbers[0].replace(/,/g, ''));
+            };
+
+            const getDaysRemaining = (closingDateStr) => {
+                if (!closingDateStr) return null;
+                const d = new Date(closingDateStr);
+                if (isNaN(d.getTime())) return null;
+                d.setHours(23, 59, 59, 999);
+                const now = new Date();
+                const diffMs = d.getTime() - now.getTime();
+                return Math.ceil(diffMs / 86400000);
+            };
+
+            const getSortedResults = (list) => {
+                const arr = [...list];
+                if (sortBy === 'closing') {
+                    arr.sort((a, b) => {
+                        const da = new Date(a.closingDate).getTime();
+                        const db = new Date(b.closingDate).getTime();
+                        const aValid = !isNaN(da), bValid = !isNaN(db);
+                        if (!aValid && !bValid) return 0;
+                        if (!aValid) return 1;
+                        if (!bValid) return -1;
+                        return da - db;
+                    });
+                } else if (sortBy === 'amount') {
+                    arr.sort((a, b) => parseAmount(b.amount) - parseAmount(a.amount));
+                } else if (sortBy === 'success') {
+                    arr.sort((a, b) => {
+                        const ra = parseFloat(a.successRate);
+                        const rb = parseFloat(b.successRate);
+                        const raVal = isNaN(ra) ? -1 : ra;
+                        const rbVal = isNaN(rb) ? -1 : rb;
+                        return rbVal - raVal;
+                    });
+                }
+                return arr;
+            };
+
+            const isSaved = (grant) => savedGrants.some(g => grantKey(g) === grantKey(grant));
+
+            const toggleSave = (grant) => {
+                setSavedGrants(prev => {
+                    const key = grantKey(grant);
+                    const exists = prev.some(g => grantKey(g) === key);
+                    const next = exists ? prev.filter(g => grantKey(g) !== key) : [...prev, grant];
+                    try {
+                        localStorage.setItem('savedGrants', JSON.stringify(next));
+                    } catch (e) {
+                        console.error('Could not save to localStorage:', e);
+                    }
+                    return next;
+                });
+            };
+
+            const downloadICS = (grant) => {
+                const d = new Date(grant.closingDate);
+                if (isNaN(d.getTime())) {
+                    alert("Could not add to calendar — this grant's closing date isn't in a recognizable format.");
+                    return;
+                }
+                const pad = (n) => String(n).padStart(2, '0');
+                const dateStr = `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T090000Z`;
+                const escapeICS = (s) => (s || '').replace(/[\n\r]/g, ' ').replace(/,/g, '\\,').replace(/;/g, '\\;');
+                const ics = [
+                    'BEGIN:VCALENDAR',
+                    'VERSION:2.0',
+                    'PRODID:-//Grant Intelligence//EN',
+                    'BEGIN:VEVENT',
+                    `UID:${Date.now()}-${Math.random().toString(36).substring(2, 8)}@grant-intelligence`,
+                    `DTSTAMP:${dateStr}`,
+                    `DTSTART:${dateStr}`,
+                    `SUMMARY:Grant deadline: ${escapeICS(grant.name)}`,
+                    `DESCRIPTION:${escapeICS(grant.organization)} - ${escapeICS(grant.description)}. ${escapeICS(grant.url)}`,
+                    'END:VEVENT',
+                    'END:VCALENDAR'
+                ].join('\r\n');
+
+                const blob = new Blob([ics], { type: 'text/calendar' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${grant.name.replace(/[^a-z0-9]/gi, '-').substring(0, 50)}.ics`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const exportCSV = () => {
+                const list = getSortedResults(results);
+                const headers = ['Name', 'Organization', 'Amount', 'Closing Date', 'Success Rate', 'Location', 'Eligibility', 'URL', 'Description'];
+                const escapeCSV = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`;
+                const rows = list.map(g => [g.name, g.organization, g.amount, g.closingDate, g.successRate, g.location, g.eligibility, g.url, g.description].map(escapeCSV).join(','));
+                const csv = [headers.map(escapeCSV).join(','), ...rows].join('\r\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'grant-search-results.csv';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const applyFiltersAndSet = (grants) => {
+                let filtered = grants;
+                if (filters.minAmount) {
+                    filtered = filtered.filter(g => parseAmount(g.amount) >= parseInt(filters.minAmount));
+                }
+                if (filters.maxAmount) {
+                    filtered = filtered.filter(g => parseAmount(g.amount) <= parseInt(filters.maxAmount));
+                }
+                if (filters.successRate !== 'any') {
+                    filtered = filtered.filter(g => {
+                        if (g.successRate === 'Not available') return filters.successRate === 'unknown';
+                        const rate = parseFloat(g.successRate);
+                        if (filters.successRate === 'high') return rate >= 30;
+                        if (filters.successRate === 'medium') return rate >= 15 && rate < 30;
+                        if (filters.successRate === 'low') return rate < 15;
+                        return true;
+                    });
+                }
+                setResults(filtered);
+                if (filtered.length === 0) {
+                    if (grants.length === 0) {
+                        setError("No current grant opportunities with future closing dates were found for this search right now. Grant rounds open and close throughout the year — try again in a few days, or broaden the location setting.");
+                    } else {
+                        setError("The search found some grants, but none matched your amount/success-rate filters. Try widening your criteria.");
+                    }
+                }
+            };
+
+            const pollJob = async (jobId, maxAttempts) => {
+                let attempt = 0;
+                while (attempt < maxAttempts && !cancelRef.current) {
+                    await sleep(2000);
+                    attempt++;
+
+                    const statusResponse = await fetch(`/.netlify/functions/check-grant-status?jobId=${jobId}`);
+                    if (!statusResponse.ok) continue;
+
+                    const statusData = await statusResponse.json();
+
+                    if (statusData.status === 'done') {
+                        return { done: true, data: statusData.data };
+                    } else if (statusData.status === 'error') {
+                        throw new Error(statusData.error);
+                    }
+                    setStatusMessage(`Still searching... (${attempt * 2}s)`);
+                }
+                return { done: false };
+            };
+
+            const handleResult = (finalResultData) => {
+                const allText = finalResultData.content
+                    ?.filter(item => item.type === "text")
+                    .map(item => item.text)
+                    .join("\n") || '';
+
+                const grants = extractJsonArray(allText);
+
+                if (grants && Array.isArray(grants)) {
+                    applyFiltersAndSet(grants);
+                } else if (/unable to find|could not find|no.{0,20}grants?.{0,20}(found|meeting|qualifying)/i.test(allText)) {
+                    setResults([]);
+                    setError("No current grant opportunities with future closing dates were found for this search right now. Grant rounds open and close throughout the year — try again in a few days, or broaden the location setting.");
+                } else {
+                    setError("Could not parse the grant results. Showing the raw AI response below for debugging.");
+                    setDebugText(allText || '(empty response)');
+                }
+            };
+
+            const searchGrants = async () => {
+                setIsSearching(true);
+                setError(null);
+                setDebugText(null);
+                setResults([]);
+                setCacheInfo(null);
+                setStatusMessage('Starting search...');
+                setPendingJobId(null);
+                setShowSaved(false);
+                cancelRef.current = false;
+
+                updateUrl(filters, sortBy);
+
+                try {
+                    // Check for a recent cached result first, unless the user asked for a forced fresh search
+                    if (!forceRefresh) {
+                        setStatusMessage('Checking for a recent cached result...');
+                        const cacheParams = new URLSearchParams({ location: filters.location, discipline: filters.discipline });
+                        const cacheResponse = await fetch(`/.netlify/functions/get-cached-grants?${cacheParams.toString()}`);
+                        if (cacheResponse.ok) {
+                            const cacheData = await cacheResponse.json();
+                            if (cacheData.cached) {
+                                setCacheInfo({ ageMinutes: cacheData.ageMinutes });
+                                handleResult(cacheData.data);
+                                setIsSearching(false);
+                                setStatusMessage('');
+                                return;
+                            }
+                        }
+                    }
+
+                    const jobId = generateJobId();
+
+                    const startResponse = await fetch("/.netlify/functions/search-grants-background", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ jobId, filters })
+                    });
+
+                    if (!startResponse.ok && startResponse.status !== 202) {
+                        throw new Error(`Could not start the search (status ${startResponse.status}). Check that search-grants-background.js is deployed correctly.`);
+                    }
+
+                    setStatusMessage('Searching the web for current grants...');
+
+                    const result = await pollJob(jobId, 210);
+
+                    if (!result.done) {
+                        setPendingJobId(jobId);
+                        if (cancelRef.current) {
+                            setError('Search paused. Click "Check again" below to see if it finished, or start a fresh search.');
+                        } else {
+                            throw new Error('This search is unusually slow (over 7 minutes). It may still finish — click "Check again" below, or try narrowing your filters.');
+                        }
+                        return;
+                    }
+
+                    handleResult(result.data);
+                } catch (err) {
+                    setError(`Search error: ${err.message}`);
+                    console.error('Error:', err);
+                } finally {
+                    setIsSearching(false);
+                    setStatusMessage('');
+                }
+            };
+
+            const checkAgain = async () => {
+                if (!pendingJobId) return;
+                setIsSearching(true);
+                setError(null);
+                setStatusMessage('Checking on your search...');
+                cancelRef.current = false;
+
+                try {
+                    const result = await pollJob(pendingJobId, 90);
+                    if (!result.done) {
+                        throw new Error('Still not finished. You can wait a bit longer and check again, or start a fresh search.');
+                    }
+                    setPendingJobId(null);
+                    handleResult(result.data);
+                } catch (err) {
+                    setError(`Search error: ${err.message}`);
+                } finally {
+                    setIsSearching(false);
+                    setStatusMessage('');
+                }
+            };
+
+            const cancelSearch = () => {
+                cancelRef.current = true;
+                setIsSearching(false);
+                setStatusMessage('');
+            };
+
+            const renderGrantCard = (grant, index) => (
+                <div
+                    key={index}
+                    className="grant-card"
+                    style={{
+                        background: 'rgba(38, 178, 152, 0.06)',
+                        backdropFilter: 'blur(10px)',
+                        borderRadius: '16px',
+                        padding: '2rem',
+                        border: '1px solid rgba(38, 178, 152, 0.25)',
+                        transition: 'all 0.3s'
+                    }}
+                >
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        marginBottom: '1rem',
+                        gap: '1rem',
+                        flexWrap: 'wrap'
+                    }}>
+                        <h3 style={{
+                            fontSize: '1.75rem',
+                            margin: 0,
+                            fontWeight: '600',
+                            color: '#26b298'
+                        }}>
+                            {grant.name}
+                        </h3>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <button
+                                className="no-print"
+                                onClick={() => toggleSave(grant)}
+                                title={isSaved(grant) ? 'Remove from saved' : 'Save this grant'}
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '1.5rem',
+                                    lineHeight: 1,
+                                    color: isSaved(grant) ? '#eff4f2' : '#666',
+                                    padding: '0.25rem'
+                                }}
+                            >
+                                {isSaved(grant) ? '★' : '☆'}
+                            </button>
+                            <span style={{
+                                background: grant.location === 'Australia'
+                                    ? 'rgba(38, 178, 152, 0.2)'
+                                    : 'rgba(177, 29, 117, 0.2)',
+                                color: grant.location === 'Australia' ? '#26b298' : '#b11d75',
+                                padding: '0.5rem 1rem',
+                                borderRadius: '20px',
+                                fontSize: '0.85rem',
+                                fontWeight: '600',
+                                whiteSpace: 'nowrap',
+                                fontFamily: "'Inter', sans-serif"
+                            }}>
+                                {grant.location}
+                            </span>
+                        </div>
+                    </div>
+
+                    <p style={{
+                        fontSize: '1.1rem',
+                        color: '#a8a8a8',
+                        margin: '0 0 1rem 0',
+                        fontWeight: '500'
+                    }}>
+                        {grant.organization}
+                    </p>
+
+                    <p style={{
+                        fontSize: '1rem',
+                        lineHeight: '1.6',
+                        color: '#c8c8c8',
+                        marginBottom: '1.5rem',
+                        fontFamily: "'Inter', sans-serif"
+                    }}>
+                        {grant.description}
+                    </p>
+
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                        gap: '1rem',
+                        marginBottom: '1.5rem',
+                        fontFamily: "'Inter', sans-serif"
+                    }}>
+                        <div>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                color: '#a8a8a8',
+                                fontSize: '0.85rem',
+                                marginBottom: '0.25rem'
+                            }}>
+                                <DollarSign size={16} />
+                                Funding Amount
+                            </div>
+                            <div style={{
+                                fontSize: '1.25rem',
+                                fontWeight: '600',
+                                color: '#e8e8e8'
+                            }}>
+                                {grant.amount}
+                            </div>
+                        </div>
+
+                        <div>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                color: '#a8a8a8',
+                                fontSize: '0.85rem',
+                                marginBottom: '0.25rem'
+                            }}>
+                                <Calendar size={16} />
+                                Closing Date
+                            </div>
+                            <div style={{
+                                fontSize: '1.25rem',
+                                fontWeight: '600',
+                                color: '#e8e8e8'
+                            }}>
+                                {grant.closingDate}
+                            </div>
+                            {(() => {
+                                const days = getDaysRemaining(grant.closingDate);
+                                if (days === null) return null;
+                                const color = days <= 7 ? '#ff6b6b' : days <= 30 ? '#f3a712' : '#26b298';
+                                const text = days < 0 ? 'Closing date may have passed' : days === 0 ? 'Closes today' : `Closes in ${days} day${days === 1 ? '' : 's'}`;
+                                return (
+                                    <div style={{ fontSize: '0.85rem', color, fontWeight: '600', marginTop: '0.25rem' }}>
+                                        {text}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+
+                        <div>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                color: '#a8a8a8',
+                                fontSize: '0.85rem',
+                                marginBottom: '0.25rem'
+                            }}>
+                                <TrendingUp size={16} />
+                                Success Rate
+                            </div>
+                            <div style={{
+                                fontSize: '1.25rem',
+                                fontWeight: '600',
+                                color: '#e8e8e8'
+                            }}>
+                                {grant.successRate}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{
+                        padding: '1rem',
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        borderRadius: '8px',
+                        marginBottom: '1rem'
+                    }}>
+                        <div style={{
+                            fontSize: '0.85rem',
+                            color: '#a8a8a8',
+                            marginBottom: '0.5rem',
+                            fontFamily: "'Inter', sans-serif"
+                        }}>
+                            Eligibility
+                        </div>
+                        <div style={{
+                            fontSize: '1rem',
+                            color: '#e8e8e8',
+                            fontFamily: "'Inter', sans-serif"
+                        }}>
+                            {grant.eligibility}
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        {grant.url && (
+                            <a
+                                href={grant.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.75rem 1.5rem',
+                                    background: '#b11d75',
+                                    color: '#ffffff',
+                                    textDecoration: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '1rem',
+                                    fontWeight: '600',
+                                    fontFamily: "'Inter', sans-serif"
+                                }}
+                            >
+                                View Application Details
+                                <ExternalLink size={16} />
+                            </a>
+                        )}
+                        <button
+                            className="no-print"
+                            onClick={() => downloadICS(grant)}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.75rem 1.5rem',
+                                background: 'transparent',
+                                border: '1px solid #26b298',
+                                color: '#26b298',
+                                borderRadius: '8px',
+                                fontSize: '1rem',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                fontFamily: "'Inter', sans-serif"
+                            }}
+                        >
+                            <Calendar size={16} />
+                            Add to Calendar
+                        </button>
+                    </div>
+                </div>
+            );
+
+            const displayedResults = getSortedResults(results);
+            const displayedSaved = getSortedResults(savedGrants);
+
+            return (
+                <div style={{
+                    minHeight: '100vh',
+                    background: 'linear-gradient(135deg, #000000 0%, #0f2a24 100%)',
+                    fontFamily: "'Crimson Pro', 'Georgia', serif",
+                    color: '#e8e8e8',
+                    padding: '3rem 2rem'
+                }}>
+                    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+                        <div style={{
+                            marginBottom: '3rem',
+                            borderBottom: '3px solid #1a3d37',
+                            paddingBottom: '2rem'
+                        }}>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'flex-start',
+                                flexWrap: 'wrap',
+                                gap: '1rem'
+                            }}>
+                                <div style={{
+                                    background: '#eff4f2',
+                                    borderRadius: '10px',
+                                    padding: '0.85rem 1.25rem',
+                                    marginBottom: '1.5rem',
+                                    display: 'inline-block'
+                                }}>
+                                    <img
+                                        src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/4QMERXhpZgAATU0AKgAAAAgABAE7AAIAAAATAAABSodpAAQAAAABAAABXpydAAEAAAAmAAAC1uocAAcAAAEMAAAAPgAAAAAc6gAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU3RldmUgRCdBTEVTU0FORFJPAAAABZADAAIAAAAUAAACrJAEAAIAAAAUAAACwJKRAAIAAAADOTYAAJKSAAIAAAADOTYAAOocAAcAAAEMAAABoAAAAAAc6gAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMjAyNTowMjoyNCAxMDoxMToyOAAyMDI1OjAyOjI0IDEwOjExOjI4AAAAUwB0AGUAdgBlACAARAAnAEEATABFAFMAUwBBAE4ARABSAE8AAAD/4QQlaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8P3hwYWNrZXQgYmVnaW49J++7vycgaWQ9J1c1TTBNcENlaGlIenJlU3pOVGN6a2M5ZCc/Pg0KPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyI+PHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj48cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0idXVpZDpmYWY1YmRkNS1iYTNkLTExZGEtYWQzMS1kMzNkNzUxODJmMWIiIHhtbG5zOmRjPSJodHRwOi8vcHVybC5vcmcvZGMvZWxlbWVudHMvMS4xLyIvPjxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSJ1dWlkOmZhZjViZGQ1LWJhM2QtMTFkYS1hZDMxLWQzM2Q3NTE4MmYxYiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIj48eG1wOkNyZWF0ZURhdGU+MjAyNS0wMi0yNFQxMDoxMToyOC45NTg8L3htcDpDcmVhdGVEYXRlPjwvcmRmOkRlc2NyaXB0aW9uPjxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSJ1dWlkOmZhZjViZGQ1LWJhM2QtMTFkYS1hZDMxLWQzM2Q3NTE4MmYxYiIgeG1sbnM6ZGM9Imh0dHA6Ly9wdXJsLm9yZy9kYy9lbGVtZW50cy8xLjEvIj48ZGM6Y3JlYXRvcj48cmRmOlNlcSB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPjxyZGY6bGk+U3RldmUgRCdBTEVTU0FORFJPPC9yZGY6bGk+PC9yZGY6U2VxPg0KCQkJPC9kYzpjcmVhdG9yPjwvcmRmOkRlc2NyaXB0aW9uPjwvcmRmOlJERj48L3g6eG1wbWV0YT4NCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAg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"
+                                        alt="Edith Cowan University - School of Business and Law"
+                                        style={{ height: '44px', display: 'block' }}
+                                    />
+                                </div>
+                                <button
+                                    className="no-print"
+                                    onClick={() => setShowSaved(s => !s)}
+                                    style={{
+                                        padding: '0.6rem 1.25rem',
+                                        background: 'transparent',
+                                        border: '1px solid #eff4f2',
+                                        borderRadius: '8px',
+                                        color: '#eff4f2',
+                                        fontSize: '0.9rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        fontFamily: "'Inter', sans-serif"
+                                    }}
+                                >
+                                    {showSaved ? 'Back to Search' : `★ Saved Grants (${savedGrants.length})`}
+                                </button>
+                            </div>
+                            <h1 style={{
+                                fontSize: '3.5rem',
+                                fontWeight: '700',
+                                margin: '0 0 0.5rem 0',
+                                background: 'linear-gradient(135deg, #26b298 0%, #b11d75 100%)',
+                                WebkitBackgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent',
+                                backgroundClip: 'text',
+                                letterSpacing: '-0.02em'
+                            }}>
+                                Grant Intelligence
+                            </h1>
+                            <p style={{
+                                fontSize: '1.25rem',
+                                color: '#a8a8a8',
+                                margin: 0,
+                                fontFamily: "'Inter', sans-serif"
+                            }}>
+                                AI-powered grant discovery for Early Career Researchers in Business & Law
+                            </p>
+                        </div>
+
+                        {showSaved ? (
+                            <div>
+                                <h2 style={{ fontSize: '2rem', marginBottom: '1.5rem', fontWeight: '600' }}>
+                                    Your Saved Grants ({savedGrants.length})
+                                </h2>
+                                {savedGrants.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '4rem 2rem', color: '#a8a8a8' }}>
+                                        <p style={{ fontSize: '1.25rem', fontFamily: "'Inter', sans-serif" }}>
+                                            No saved grants yet. Click the ☆ on any grant to save it here — even across future searches.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'grid', gap: '1.5rem' }}>
+                                        {displayedSaved.map((grant, index) => renderGrantCard(grant, 'saved-' + index))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                        <React.Fragment>
+                        <div className="no-print" style={{
+                            background: 'rgba(38, 178, 152, 0.06)',
+                            backdropFilter: 'blur(10px)',
+                            borderRadius: '16px',
+                            padding: '2rem',
+                            marginBottom: '2rem',
+                            border: '1px solid rgba(38, 178, 152, 0.25)'
+                        }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <Filter size={20} color="#26b298" />
+                                <h2 style={{ fontSize: '1.5rem', margin: 0, fontWeight: '600' }}>Search Filters</h2>
+                            </div>
+
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                gap: '1.5rem',
+                                fontFamily: "'Inter', sans-serif"
+                            }}>
+                                <div>
+                                    <label style={{
+                                        display: 'block',
+                                        marginBottom: '0.5rem',
+                                        fontSize: '0.9rem',
+                                        color: '#a8a8a8',
+                                        fontWeight: '500'
+                                    }}>
+                                        <MapPin size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                                        Location
+                                    </label>
+                                    <select
+                                        value={filters.location}
+                                        onChange={(e) => setFilters({ ...filters, location: e.target.value })}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            background: '#111111',
+                                            border: '1px solid #1f4a43',
+                                            borderRadius: '8px',
+                                            color: '#e8e8e8',
+                                            fontSize: '1rem',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <option value="both">Australia & International</option>
+                                        <option value="australia">Australia Only</option>
+                                        <option value="international">International Only</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label style={{
+                                        display: 'block',
+                                        marginBottom: '0.5rem',
+                                        fontSize: '0.9rem',
+                                        color: '#a8a8a8',
+                                        fontWeight: '500'
+                                    }}>
+                                        Discipline
+                                    </label>
+                                    <select
+                                        value={filters.discipline}
+                                        onChange={(e) => setFilters({ ...filters, discipline: e.target.value })}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            background: '#111111',
+                                            border: '1px solid #1f4a43',
+                                            borderRadius: '8px',
+                                            color: '#e8e8e8',
+                                            fontSize: '1rem',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <option value="both">Business & Law</option>
+                                        <option value="business">Business Only</option>
+                                        <option value="law">Law Only</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label style={{
+                                        display: 'block',
+                                        marginBottom: '0.5rem',
+                                        fontSize: '0.9rem',
+                                        color: '#a8a8a8',
+                                        fontWeight: '500'
+                                    }}>
+                                        <DollarSign size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                                        Min Amount (AUD)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={filters.minAmount}
+                                        onChange={(e) => setFilters({ ...filters, minAmount: e.target.value })}
+                                        placeholder="e.g., 5000"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            background: '#111111',
+                                            border: '1px solid #1f4a43',
+                                            borderRadius: '8px',
+                                            color: '#e8e8e8',
+                                            fontSize: '1rem'
+                                        }}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label style={{
+                                        display: 'block',
+                                        marginBottom: '0.5rem',
+                                        fontSize: '0.9rem',
+                                        color: '#a8a8a8',
+                                        fontWeight: '500'
+                                    }}>
+                                        <DollarSign size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                                        Max Amount (AUD)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={filters.maxAmount}
+                                        onChange={(e) => setFilters({ ...filters, maxAmount: e.target.value })}
+                                        placeholder="e.g., 100000"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            background: '#111111',
+                                            border: '1px solid #1f4a43',
+                                            borderRadius: '8px',
+                                            color: '#e8e8e8',
+                                            fontSize: '1rem'
+                                        }}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label style={{
+                                        display: 'block',
+                                        marginBottom: '0.5rem',
+                                        fontSize: '0.9rem',
+                                        color: '#a8a8a8',
+                                        fontWeight: '500'
+                                    }}>
+                                        <TrendingUp size={16} style={{ display: 'inline', marginRight: '0.5rem' }} />
+                                        Success Rate
+                                    </label>
+                                    <select
+                                        value={filters.successRate}
+                                        onChange={(e) => setFilters({ ...filters, successRate: e.target.value })}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            background: '#111111',
+                                            border: '1px solid #1f4a43',
+                                            borderRadius: '8px',
+                                            color: '#e8e8e8',
+                                            fontSize: '1rem',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <option value="any">Any Success Rate</option>
+                                        <option value="high">High (≥30%)</option>
+                                        <option value="medium">Medium (15-30%)</option>
+                                        <option value="low">&lt;15%</option>
+                                        <option value="unknown">Unknown/Not Available</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label style={{
+                                        display: 'block',
+                                        marginBottom: '0.5rem',
+                                        fontSize: '0.9rem',
+                                        color: '#a8a8a8',
+                                        fontWeight: '500'
+                                    }}>
+                                        Sort Results By
+                                    </label>
+                                    <select
+                                        value={sortBy}
+                                        onChange={(e) => setSortBy(e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            background: '#111111',
+                                            border: '1px solid #1f4a43',
+                                            borderRadius: '8px',
+                                            color: '#e8e8e8',
+                                            fontSize: '1rem',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <option value="closing">Closing Soonest</option>
+                                        <option value="amount">Amount (High to Low)</option>
+                                        <option value="success">Success Rate (High to Low)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <label style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                marginTop: '1.25rem',
+                                fontSize: '0.9rem',
+                                color: '#a8a8a8',
+                                cursor: 'pointer',
+                                fontFamily: "'Inter', sans-serif"
+                            }}>
+                                <input
+                                    type="checkbox"
+                                    checked={forceRefresh}
+                                    onChange={(e) => setForceRefresh(e.target.checked)}
+                                />
+                                Force fresh search (skip cached results, always search live)
+                            </label>
+
+                            <button
+                                onClick={searchGrants}
+                                disabled={isSearching}
+                                style={{
+                                    marginTop: '1.5rem',
+                                    width: '100%',
+                                    padding: '1rem',
+                                    background: isSearching
+                                        ? 'linear-gradient(135deg, #444 0%, #666 100%)'
+                                        : '#26b298',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    color: '#ffffff',
+                                    fontSize: '1.1rem',
+                                    fontWeight: '600',
+                                    cursor: isSearching ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.5rem',
+                                    fontFamily: "'Inter', sans-serif"
+                                }}
+                            >
+                                {isSearching ? (
+                                    <>
+                                        <Loader2 size={20} />
+                                        {statusMessage || 'Searching...'}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Search size={20} />
+                                        Search Grants
+                                    </>
+                                )}
+                            </button>
+
+                            {isSearching && (
+                                <button
+                                    onClick={cancelSearch}
+                                    style={{
+                                        marginTop: '0.75rem',
+                                        width: '100%',
+                                        padding: '0.75rem',
+                                        background: 'transparent',
+                                        border: '1px solid #666',
+                                        borderRadius: '8px',
+                                        color: '#aaa',
+                                        fontSize: '0.9rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        fontFamily: "'Inter', sans-serif"
+                                    }}
+                                >
+                                    Cancel waiting
+                                </button>
+                            )}
+
+                            {pendingJobId && !isSearching && (
+                                <button
+                                    onClick={checkAgain}
+                                    style={{
+                                        marginTop: '0.75rem',
+                                        width: '100%',
+                                        padding: '0.85rem',
+                                        background: 'transparent',
+                                        border: '1px solid #b11d75',
+                                        borderRadius: '8px',
+                                        color: '#b11d75',
+                                        fontSize: '1rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        fontFamily: "'Inter', sans-serif"
+                                    }}
+                                >
+                                    Check again on previous search
+                                </button>
+                            )}
+
+                            {isSearching && (
+                                <p style={{
+                                    marginTop: '0.75rem',
+                                    fontSize: '0.85rem',
+                                    color: '#888',
+                                    textAlign: 'center',
+                                    fontFamily: "'Inter', sans-serif"
+                                }}>
+                                    Real web searches can take up to a couple of minutes — the job keeps running even if you close this tab.
+                                </p>
+                            )}
+                        </div>
+
+                        {cacheInfo && (
+                            <div className="no-print" style={{
+                                background: 'rgba(38, 178, 152, 0.1)',
+                                border: '1px solid rgba(38, 178, 152, 0.3)',
+                                borderRadius: '12px',
+                                padding: '0.85rem 1.25rem',
+                                marginBottom: '1.5rem',
+                                color: '#26b298',
+                                fontSize: '0.9rem',
+                                fontFamily: "'Inter', sans-serif"
+                            }}>
+                                ⚡ Instant result — from a search run {cacheInfo.ageMinutes < 1 ? 'less than a minute' : cacheInfo.ageMinutes + ' minute' + (cacheInfo.ageMinutes === 1 ? '' : 's')} ago. Tick "Force fresh search" above for live data.
+                            </div>
+                        )}
+
+                        {error && (
+                            <div className="no-print" style={{
+                                background: 'rgba(233, 69, 96, 0.2)',
+                                border: '1px solid #e94560',
+                                borderRadius: '12px',
+                                padding: '1rem',
+                                marginBottom: '2rem',
+                                color: '#ff6b6b'
+                            }}>
+                                {error}
+                            </div>
+                        )}
+
+                        {debugText && (
+                            <div className="no-print" style={{
+                                background: 'rgba(0,0,0,0.4)',
+                                border: '1px solid #666',
+                                borderRadius: '12px',
+                                padding: '1rem',
+                                marginBottom: '2rem',
+                                color: '#ccc',
+                                fontFamily: 'monospace',
+                                fontSize: '0.85rem',
+                                whiteSpace: 'pre-wrap',
+                                maxHeight: '300px',
+                                overflowY: 'auto'
+                            }}>
+                                {debugText}
+                            </div>
+                        )}
+
+                        {results.length > 0 && (
+                            <div>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    flexWrap: 'wrap',
+                                    gap: '1rem',
+                                    marginBottom: '1.5rem'
+                                }}>
+                                    <h2 style={{
+                                        fontSize: '2rem',
+                                        margin: 0,
+                                        fontWeight: '600'
+                                    }}>
+                                        Found {results.length} Current Opportunities
+                                    </h2>
+                                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                                        <button
+                                            className="no-print"
+                                            onClick={exportCSV}
+                                            style={{
+                                                padding: '0.6rem 1.25rem',
+                                                background: 'transparent',
+                                                border: '1px solid #b11d75',
+                                                borderRadius: '8px',
+                                                color: '#b11d75',
+                                                fontSize: '0.9rem',
+                                                fontWeight: '600',
+                                                cursor: 'pointer',
+                                                fontFamily: "'Inter', sans-serif"
+                                            }}
+                                        >
+                                            Export to CSV
+                                        </button>
+                                        <button
+                                            className="no-print"
+                                            onClick={() => window.print()}
+                                            style={{
+                                                padding: '0.6rem 1.25rem',
+                                                background: 'transparent',
+                                                border: '1px solid #26b298',
+                                                borderRadius: '8px',
+                                                color: '#26b298',
+                                                fontSize: '0.9rem',
+                                                fontWeight: '600',
+                                                cursor: 'pointer',
+                                                fontFamily: "'Inter', sans-serif"
+                                            }}
+                                        >
+                                            Export to PDF
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gap: '1.5rem' }}>
+                                    {displayedResults.map((grant, index) => renderGrantCard(grant, index))}
+                                </div>
+                            </div>
+                        )}
+
+                        {!isSearching && results.length === 0 && !error && (
+                            <div style={{
+                                textAlign: 'center',
+                                padding: '4rem 2rem',
+                                color: '#a8a8a8'
+                            }}>
+                                <Search size={64} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                                <p style={{
+                                    fontSize: '1.25rem',
+                                    fontFamily: "'Inter', sans-serif"
+                                }}>
+                                    Configure your filters and click "Search Grants" to find current opportunities
+                                </p>
+                            </div>
+                        )}
+                        </React.Fragment>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<GrantSearchAgent />, document.getElementById('root'));
+    </script>
+</body>
+</html>
