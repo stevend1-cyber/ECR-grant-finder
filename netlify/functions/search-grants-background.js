@@ -5,7 +5,7 @@ exports.handler = async function (event, context) {
   // without this, getStore() throws on every single invocation.
   connectLambda(event);
 
-  const store = getStore({ name: "grant-jobs", consistency: "strong" });
+  const store = getStore({ name: "grant-jobs" });
 
   let jobId;
   try {
@@ -67,28 +67,47 @@ Find exactly 4 grants specifically for Business, Law, or related social sciences
     const MAX_CONTINUATIONS = 2;
 
     for (let attempt = 0; attempt <= MAX_CONTINUATIONS; attempt++) {
-      console.log(`[${jobId}] API call attempt ${attempt + 1}`);
+      console.log(`[${jobId}] API call attempt ${attempt + 1} starting at`, new Date().toISOString());
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01"
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001", // faster model — this task is mostly search + formatting, not deep reasoning
-          max_tokens: 8000, // generous budget so the final JSON never gets starved out
-          tools: [{
-            type: "web_search_20250305",
-            name: "web_search",
-            max_uses: 2
-          }],
-          messages
-        })
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s per attempt
 
-      console.log(`[${jobId}] API response status:`, response.status);
+      let response;
+      try {
+        response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01"
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 8000,
+            tools: [{
+              type: "web_search_20250305",
+              name: "web_search",
+              max_uses: 2
+            }],
+            messages
+          })
+        });
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        if (fetchErr.name === 'AbortError') {
+          console.log(`[${jobId}] Attempt ${attempt + 1} timed out after 90s`);
+          await store.setJSON(jobId, {
+            status: "error",
+            error: `The AI call itself hung for over 90 seconds on attempt ${attempt + 1} and was aborted. This points to a network/API issue rather than a slow search.`
+          });
+          return;
+        }
+        throw fetchErr;
+      }
+      clearTimeout(timeoutId);
+
+      console.log(`[${jobId}] API response status:`, response.status, 'at', new Date().toISOString());
 
       if (!response.ok) {
         const errorText = await response.text();
