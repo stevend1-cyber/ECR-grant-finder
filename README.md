@@ -40,6 +40,21 @@ This app needs to do a real-time web search + AI synthesis, which routinely take
 
 ---
 
+## Features
+
+- **AI-powered search** across the live web for current Business/Law ECR grants (Australia and/or international)
+- **Filters**: location, discipline (Business/Law/both), funding amount range, success rate
+- **Sorting**: by closing date, amount, or success rate
+- **Deadline countdown** on each grant card (colour-coded: red ≤7 days, amber ≤30 days, teal beyond)
+- **Save/bookmark grants** — persists in the browser (localStorage) across searches and sessions, no login needed
+- **Add to Calendar** — downloads an `.ics` file for a grant's closing date
+- **Shareable search links** — filters are encoded in the URL, so sending a link reproduces the same search
+- **Export to PDF** (via browser print) and **Export to CSV**
+- **24-hour result caching** — repeat searches with the same location+discipline combination return instantly instead of re-running a full AI search, cutting Anthropic API costs. A "Force fresh search" checkbox bypasses the cache when needed.
+- **ECU branding** — School of Business and Law logo, official brand colours (Teal `#26b298`, Plum `#b11d75`, Black, White, Ecru `#eff4f2`)
+
+---
+
 ## File Structure
 
 ```
@@ -47,8 +62,9 @@ This app needs to do a real-time web search + AI synthesis, which routinely take
 ├── package.json                                # Declares the @netlify/blobs dependency
 └── netlify/
     └── functions/
-        ├── search-grants-background.js         # Does the actual AI + web search work
-        └── check-grant-status.js               # Fast poll endpoint the frontend calls
+        ├── search-grants-background.js         # Does the AI + web search work; also writes cache
+        ├── check-grant-status.js               # Fast poll endpoint the frontend calls
+        └── get-cached-grants.js                # Checks for a fresh (<24h) cached result before searching
 ```
 
 ---
@@ -89,6 +105,10 @@ These are the specific gotchas that caused real debugging time — worth knowing
 - **CORS headers must be on every response** — including error responses and the `OPTIONS` preflight handler. Missing them anywhere shows up in the browser as an opaque "Failed to fetch" / "Access not allowed."
 
 - **Anthropic model names get retired.** If you start seeing an API error like `model: not_found_error`, it means the hardcoded model string in `search-grants-background.js` (currently `claude-haiku-4-5-20251001`) has been deprecated. Check https://docs.claude.com/en/docs/about-claude/models/overview for the current model list and swap it in.
+
+- **The AI can legitimately find zero qualifying grants.** Grant rounds open and close throughout the year — it's normal and correct for a search to sometimes return no results. The prompt explicitly allows Claude to return an empty JSON array `[]` rather than forcing a fixed count, and the frontend shows a calm "nothing found right now" message rather than treating this as an error.
+
+- **Caching keys only vary by location + discipline.** The amount and success-rate filters are applied client-side after the fact (the AI search itself doesn't vary by them), so the cache key is deliberately just `location:discipline` — this keeps the cache hit rate high without needing to cache every possible filter combination.
 
 - **Claude's `web_search` tool can return `stop_reason: "pause_turn"`** on longer turns — this means the API paused mid-response and expects you to send the partial response back to continue. The background function handles this automatically (see the continuation loop), capped at 2 retries to bound total latency.
 
