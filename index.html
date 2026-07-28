@@ -171,7 +171,11 @@
                 }
                 setResults(filtered);
                 if (filtered.length === 0) {
-                    setError("The search completed but no grants matched your filters. Try widening your criteria.");
+                    if (grants.length === 0) {
+                        setError("No current grant opportunities with future closing dates were found for this search right now. Grant rounds open and close throughout the year — try again in a few days, or broaden the location setting.");
+                    } else {
+                        setError("The search found some grants, but none matched your amount/success-rate filters. Try widening your criteria.");
+                    }
                 }
             };
 
@@ -206,6 +210,11 @@
 
                 if (grants && Array.isArray(grants)) {
                     applyFiltersAndSet(grants);
+                } else if (/unable to find|could not find|no.{0,20}grants?.{0,20}(found|meeting|qualifying)/i.test(allText)) {
+                    // Claude wrote a prose explanation instead of JSON — treat as a
+                    // legitimate "nothing currently qualifies" result, not an error.
+                    setResults([]);
+                    setError("No current grant opportunities with future closing dates were found for this search right now. Grant rounds open and close throughout the year — try again in a few days, or broaden the location setting.");
                 } else {
                     setError("Could not parse the grant results. Showing the raw AI response below for debugging.");
                     setDebugText(allText || '(empty response)');
